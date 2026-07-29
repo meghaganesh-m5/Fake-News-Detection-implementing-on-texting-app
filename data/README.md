@@ -1,46 +1,60 @@
-# Fine-Tuned Misinformation Detection Model
+# Dataset & Augmentation Pipeline
 
-A DistilBERT transformer fine-tuned for binary misinformation classification (Fake/Real), trained on 
-the augmented dataset described in [`/data`](../data).
+This folder contains the training, validation, and test datasets used to fine-tune the misinformation 
+detection model, along with the methodology used to build them.
 
-## Model Details
+## Source Dataset
 
-- **Base model:** `distilbert-base-uncased`
-- **Task:** Binary sequence classification
-- **Label mapping:** `Fake = 0`, `Real = 1`
-- **Tokenizer settings:** `max_length=256`, `padding="max_length"`, `truncation=True`
-- **Framework:** HuggingFace Transformers, PyTorch
+Built on **LIAR2** (`chengxuphd/liar2`), an updated version of the LIAR dataset containing ~23,000 
+real political statements fact-checked by professional journalists at PolitiFact, each rated on a 
+6-point truth scale (pants-fire, false, barely-true, half-true, mostly-true, true).
 
-## Evaluation Results
+## Label Simplification
 
-Evaluated on two separate test sets to specifically measure generalization from formal to informal, 
-forward-style text:
+The 6-point scale was collapsed into binary labels for classification:
+- **Fake** = pants-fire, false, barely-true
+- **Real** = mostly-true, true
+- **half-true** was dropped as an ambiguous middle category — a deliberate scoping decision to avoid 
+  injecting label noise into training.
 
-| Test Set | Accuracy | F1 Score |
+## The Core Problem: Domain Mismatch
+
+Existing fake-news datasets like LIAR2 consist entirely of formal, journalist-style statements. Real-world 
+misinformation, however, spreads through informal, emoji-heavy, ALL-CAPS WhatsApp-style forwards — a 
+completely different writing style. A model trained only on formal text risks failing to generalize to 
+how misinformation actually appears in the wild.
+
+## Augmentation Strategy
+
+Two complementary techniques were used to bridge this gap:
+
+1. **Rule-based augmentation** — A custom transformation function applied to 40% of training data, adding 
+   urgency phrases ("SHARE BEFORE DELETED"), "Fwd:" prefixes, emoji clusters, and randomized caps emphasis 
+   to simulate real forward-style formatting.
+
+2. **LLM-assisted augmentation** — A smaller, higher-quality subset (60 examples) manually rewritten via 
+   LLM prompting into natural, informal forward-style language (typos, abbreviations, rhetorical hooks), 
+   adding variety the rule-based method alone couldn't achieve.
+
+## Final Dataset Composition
+
+| Split | Rows | Composition |
 |---|---|---|
-| Formal (baseline) | 70.7% | 0.619 |
-| Forward-style | 74.3% | 0.655 |
+| Train | 21,623 | Original (15,402) + Rule-augmented (6,161) + LLM-augmented (60) |
+| Validation (formal) | 1,926 | Formal-style only |
+| Test (formal) | 1,925 | Formal-style baseline test set |
+| Test (forward-style) | 300 | Forward-ified validation subset — tests domain adaptation |
 
-**Per-class performance (formal test set):**
-
-| Class | Precision | Recall | F1 |
-|---|---|---|---|
-| Fake | 0.86 | 0.68 | 0.76 |
-| Real | 0.52 | 0.76 | 0.62 |
-
-## Known Limitations
-
-- **Class imbalance effect:** Training data has a ~2.2:1 Fake:Real ratio, resulting in lower precision 
-  on "Real" predictions. This directly motivated the addition of a human-in-the-loop community 
-  verification layer in the full system rather than relying on the model in isolation.
-- **Domain scope:** The model is trained and validated specifically on political, social, and health-related 
-  misinformation-style claims — the dominant categories of real-world WhatsApp forward content. It is 
-  **not** designed as a general-purpose fact-checker for arbitrary trivia or scientific claims outside 
-  this domain, and confident misclassification should be expected on out-of-domain inputs.
+**Label balance:** ~2.2:1 Fake:Real ratio across all splits (documented limitation — see model README).
 
 ## Files
 
-- `config.json`, `model.safetensors`, `tokenizer.json`, `tokenizer_config.json` — Model and tokenizer weights
-- Loadable via `AutoModelForSequenceClassification.from_pretrained()` and `AutoTokenizer.from_pretrained()`
+- `train_final.csv` — Final augmented training set
+- `val_formal.csv` — Formal-style validation set
+- `test_formal.csv` — Formal-style test set (baseline evaluation)
+- `test_forward_style.csv` — Forward-style test set (domain adaptation evaluation)
 
-*(Model files to be added — note: model.safetensors is ~241MB, may require Git LFS)*
+Each file contains `statement_clean` (text) and `binary_label` (Fake/Real) columns, plus original 
+metadata from the source dataset.
+
+*(CSV files to be added)*****
